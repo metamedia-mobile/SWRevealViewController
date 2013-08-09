@@ -110,6 +110,8 @@ typedef enum
 @property (nonatomic, readonly) UIView *frontView;
 @property (nonatomic, assign) BOOL disableLayout;
 
+@property (nonatomic, readonly) UIView *frontCoverView;
+
 @end
 
 
@@ -139,11 +141,16 @@ static CGFloat scaledValue( CGFloat v1, CGFloat min2, CGFloat max2, CGFloat min1
     {
         _c = controller;
         CGRect bounds = self.bounds;
-    
+        
         _frontView = [[UIView alloc] initWithFrame:bounds];
         _frontView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-
         [self addSubview:_frontView];
+        
+        _frontCoverView = [[UIView alloc] initWithFrame:bounds];
+        _frontCoverView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+        _frontCoverView.backgroundColor = [UIColor clearColor];
+        _frontCoverView.hidden = YES;
+        [_frontView addSubview:_frontCoverView];
 
         CALayer *frontViewLayer = _frontView.layer;
         frontViewLayer.masksToBounds = NO;
@@ -156,7 +163,6 @@ static CGFloat scaledValue( CGFloat v1, CGFloat min2, CGFloat max2, CGFloat min1
     
     return self;
 }
-
 
 - (void)layoutSubviews
 {
@@ -330,7 +336,8 @@ static CGFloat scaledValue( CGFloat v1, CGFloat min2, CGFloat max2, CGFloat min1
 @interface SWRevealViewController()<UIGestureRecognizerDelegate>
 {
     SWRevealView *_contentView;
-    UIPanGestureRecognizer *_panGestureRecognizer;
+    UIPanGestureRecognizer *_sharedPanGestureRecognizer;
+    UIPanGestureRecognizer *_ownedPanGestureRecognizer;
     FrontViewPosition _frontViewPosition;
     FrontViewPosition _rearViewPosition;
     FrontViewPosition _rightViewPosition;
@@ -466,9 +473,19 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
     
     // set the content view to resize along with its superview
      [_contentView setAutoresizingMask:UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight];
-
+    
     // set our contentView to the controllers view
     self.view = _contentView;
+    
+    // Add gestre recognizer for taps and swipes when covering the front view
+    SWDirectionPanGestureRecognizer *pan = [[SWDirectionPanGestureRecognizer alloc] initWithTarget:self action:@selector(_handleRevealGesture:)];
+    pan.direction = SWDirectionPanGestureRecognizerHorizontal;
+    pan.delegate = self;
+    _ownedPanGestureRecognizer = pan;
+    [_contentView.frontCoverView addGestureRecognizer:pan];
+    
+    UITapGestureRecognizer *tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_handleTapGestureInCoverFrontView:)];
+    [_contentView.frontCoverView addGestureRecognizer:tapGestureRecognizer];
     
     // load any defined front/rear controllers from the storyboard
     if ( self.storyboard && _rearViewController == nil )
@@ -621,21 +638,36 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
     [self _dispatchSetFrontViewPosition:frontViewPosition animated:animated];
 }
 
-
 - (UIPanGestureRecognizer*)panGestureRecognizer
 {
-    if ( _panGestureRecognizer == nil )
+    if ( _sharedPanGestureRecognizer == nil )
     {
         SWDirectionPanGestureRecognizer *customRecognizer =
             [[SWDirectionPanGestureRecognizer alloc] initWithTarget:self action:@selector(_handleRevealGesture:)];
         
         customRecognizer.direction = SWDirectionPanGestureRecognizerHorizontal;
         customRecognizer.delegate = self;
-        _panGestureRecognizer = customRecognizer ;
+        _sharedPanGestureRecognizer = customRecognizer;
     }
-    return _panGestureRecognizer;
+    return _sharedPanGestureRecognizer;
 }
 
+- (BOOL)disableFrontViewForToggle
+{
+    return !_contentView.frontCoverView.hidden;
+}
+
+- (void)setDisableFrontViewForToggle:(BOOL)disableFrontViewForToggle
+{
+    _contentView.frontCoverView.hidden = !disableFrontViewForToggle;
+    for (UIView *subview in _contentView.frontView.subviews)
+    {
+        if (subview == _contentView.frontCoverView)
+            continue;
+        
+        subview.userInteractionEnabled = !disableFrontViewForToggle;
+    }
+}
 
 #pragma mark - Provided acction methods
 
@@ -732,11 +764,54 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
 {
     // only allow gesture if no previous request is in process
-    return ( gestureRecognizer == _panGestureRecognizer && _animationQueue.count == 0) ;
+    return ( (gestureRecognizer == _sharedPanGestureRecognizer || gestureRecognizer == _ownedPanGestureRecognizer) && _animationQueue.count == 0);
 }
 
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
+{
+    if (gestureRecognizer == _sharedPanGestureRecognizer)
+    {
+        UIView *view = touch.view;
+        
+        if (_iterateInViewHierarchyForSearchingClassNames)
+        {
+            while (view != nil)
+            {
+                for (Class classType in _classNamesForIgnoringPanGestureRecognizer)
+                {
+                    if ([view isKindOfClass:classType])
+                        return NO;
+                }
+                
+                view = view.superview;
+            }
+        }
+        else
+        {
+            for (Class classType in _classNamesForIgnoringPanGestureRecognizer)
+            {
+                if ([view isKindOfClass:classType])
+                    return NO;
+            }
+        }
+        
+        if (_shouldRecognizePanGestureInView)
+        {
+            BOOL flag = _shouldRecognizePanGestureInView(view);
+            if (flag == NO)
+                return NO;
+        }
+    }
+        
+    return YES;
+}
 
 #pragma mark - Gesture Based Reveal
+
+- (void)_handleTapGestureInCoverFrontView:(UITapGestureRecognizer*)recognizer
+{
+    [self setFrontViewPosition:FrontViewPositionLeft animated:YES];
+}
 
 - (void)_handleRevealGesture:(UIPanGestureRecognizer *)recognizer
 {
@@ -1125,7 +1200,8 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
     controllerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     controllerView.frame = view.bounds;
     
-    [view addSubview:controllerView];
+//    [view addSubview:controllerView];
+    [view insertSubview:controllerView atIndex:0]; // <----- AFEGIT!!!
     
     void (^completionBlock)(void) = ^(void)
     {

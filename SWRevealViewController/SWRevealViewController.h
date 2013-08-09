@@ -98,6 +98,11 @@ typedef enum
 // is usually added on the top bar of a front controller.
 - (UIPanGestureRecognizer*)panGestureRecognizer;
 
+// Define a set of classes where the pan gesture recognizer will not operate.
+@property (strong, nonatomic) NSSet *classNamesForIgnoringPanGestureRecognizer;
+@property (assign, nonatomic) BOOL iterateInViewHierarchyForSearchingClassNames;
+@property (strong, nonatomic) BOOL (^shouldRecognizePanGestureInView)(UIView *view);
+
 // The following properties are provided for further customization, they are set to default values on initialization,
 // you should not generally have to set them
 
@@ -135,6 +140,9 @@ typedef enum
 
 //Defines the front view's shadow opacity, default is 1.0f
 @property (assign, nonatomic) CGFloat frontViewShadowOpacity;
+
+// Disable the frontViewController view's and adds a tap & pan recognizer on top.
+@property (assign, nonatomic) BOOL disableFrontViewForToggle;
 
 // The class properly handles all the relevant calls to appearance methods on the contained controllers.
 // Moreover you can assign a delegate to let the class inform you on positions and animation activity.
