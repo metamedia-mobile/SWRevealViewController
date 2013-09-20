@@ -33,9 +33,13 @@
 
 typedef enum
 {
-    SWDirectionPanGestureRecognizerVertical,
-    SWDirectionPanGestureRecognizerHorizontal
-
+    SWDirectionPanGestureRecognizerDirectionNone    = 0,
+    SWDirectionPanGestureRecognizerVerticalUp       = 0b0001,
+    SWDirectionPanGestureRecognizerVerticalDown     = 0b0010,
+    SWDirectionPanGestureRecognizerVertical         = 0b0011, //SWDirectionPanGestureRecognizerVerticalUp | SWDirectionPanGestureRecognizerVerticalDown,
+    SWDirectionPanGestureRecognizerHorizontalLeft   = 0b0100,
+    SWDirectionPanGestureRecognizerHorizontalRight  = 0b1000,
+    SWDirectionPanGestureRecognizerHorizontal       = 0b1100, //SWDirectionPanGestureRecognizerHorizontalLeft | SWDirectionPanGestureRecognizerHorizontalRight
 } SWDirectionPanGestureRecognizerDirection;
 
 @interface SWDirectionPanGestureRecognizer : UIPanGestureRecognizer
@@ -81,17 +85,31 @@ typedef enum
     
     if (abs(moveX) > kDirectionPanThreshold)
     {
-        if (_direction == SWDirectionPanGestureRecognizerHorizontal)
+        if (moveX < 0 && (_direction & SWDirectionPanGestureRecognizerHorizontalLeft))
+            _dragging = YES;
+        else if (moveX > 0 && (_direction & SWDirectionPanGestureRecognizerHorizontalRight))
             _dragging = YES;
         else
             self.state = UIGestureRecognizerStateFailed;
+        
+//        if (_direction == SWDirectionPanGestureRecognizerHorizontal)
+//            _dragging = YES;
+//        else
+//            self.state = UIGestureRecognizerStateFailed;
     }
     else if (abs(moveY) > kDirectionPanThreshold)
     {
-        if (_direction == SWDirectionPanGestureRecognizerVertical)
-            _dragging = YES ;
+        if (moveY < 0 && (_direction & SWDirectionPanGestureRecognizerVerticalDown)) // <-- Need to be tested, otherwise Down\Up could be wrong!
+            _dragging = YES;
+        else if (moveY > 0 && (_direction & SWDirectionPanGestureRecognizerVerticalUp)) // <-- Need to be tested, otherwise Down\Up could be wrong!
+            _dragging = YES;
         else
             self.state = UIGestureRecognizerStateFailed;
+        
+//        if (_direction == SWDirectionPanGestureRecognizerVertical)
+//            _dragging = YES ;
+//        else
+//            self.state = UIGestureRecognizerStateFailed;
     }
 }
 
@@ -336,7 +354,7 @@ static CGFloat scaledValue( CGFloat v1, CGFloat min2, CGFloat max2, CGFloat min1
 @interface SWRevealViewController()<UIGestureRecognizerDelegate>
 {
     SWRevealView *_contentView;
-    UIPanGestureRecognizer *_sharedPanGestureRecognizer;
+    SWDirectionPanGestureRecognizer *_sharedPanGestureRecognizer;
     UIPanGestureRecognizer *_ownedPanGestureRecognizer;
     FrontViewPosition _frontViewPosition;
     FrontViewPosition _rearViewPosition;
@@ -642,13 +660,15 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
 {
     if ( _sharedPanGestureRecognizer == nil )
     {
-        SWDirectionPanGestureRecognizer *customRecognizer =
-            [[SWDirectionPanGestureRecognizer alloc] initWithTarget:self action:@selector(_handleRevealGesture:)];
+        SWDirectionPanGestureRecognizer *customRecognizer = [[SWDirectionPanGestureRecognizer alloc] initWithTarget:self action:@selector(_handleRevealGesture:)];
         
-        customRecognizer.direction = SWDirectionPanGestureRecognizerHorizontal;
         customRecognizer.delegate = self;
+        
         _sharedPanGestureRecognizer = customRecognizer;
     }
+    
+    [self _refreshDirectionPanGestureForSharedPanGestureRecognizer];
+    
     return _sharedPanGestureRecognizer;
 }
 
@@ -807,6 +827,20 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
 }
 
 #pragma mark - Gesture Based Reveal
+
+- (void)_refreshDirectionPanGestureForSharedPanGestureRecognizer
+{
+    SWDirectionPanGestureRecognizerDirection direction = SWDirectionPanGestureRecognizerDirectionNone;
+    
+    if (self.rightViewController)
+        direction |= SWDirectionPanGestureRecognizerHorizontalLeft;
+    
+    if (self.rearViewController)
+        direction |= SWDirectionPanGestureRecognizerHorizontalRight;
+    
+    _sharedPanGestureRecognizer.direction = direction;
+}
+
 
 - (void)_handleTapGestureInCoverFrontView:(UITapGestureRecognizer*)recognizer
 {
@@ -1071,6 +1105,8 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
     _rearViewController = newRearViewController;
     [self _transitionFromViewController:old toViewController:newRearViewController inView:_contentView.frontView]();
     [self _dequeue];
+    
+    [self _refreshDirectionPanGestureForSharedPanGestureRecognizer];
 }
 
 // Primitive method for right controller transition
@@ -1080,6 +1116,8 @@ static NSString * const SWSegueRightIdentifier = @"sw_right";
     _rightViewController = newRightViewController;
     [self _transitionFromViewController:old toViewController:newRightViewController inView:_contentView.rightView]();
     [self _dequeue];
+    
+    [self _refreshDirectionPanGestureForSharedPanGestureRecognizer];
     
 //    UIViewController *old = _rightViewController;
 //    void (^completion)() = [self _transitionRearController:old toController:newRightViewController inView:_contentView.rightView];
